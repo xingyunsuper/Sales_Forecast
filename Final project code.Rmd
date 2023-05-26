@@ -1,0 +1,834 @@
+---
+title: "Sales Forecasts"
+author: "Yun Xing"
+date: '2023-05-23'
+output: html_document
+---
+
+
+#### Superstore Sales Dataset - https://www.kaggle.com/datasets/rohitsahoo/sales-forecasting
+
+
+```{r cars}
+suppressMessages(library(tidyverse))
+suppressMessages(library(maps))
+suppressMessages(library(lubridate))
+suppressMessages(library(viridis))
+suppressMessages(library(janitor))
+suppressMessages(library(scales))
+suppressMessages(library(corrplot))
+suppressMessages(library(RColorBrewer))
+suppressMessages(library(wesanderson))
+suppressMessages(library(htmltools))
+suppressMessages(library(webr))
+suppressMessages(library(fastDummies))
+```
+
+
+## Data Cleaning
+
+
+```{r}
+sales<-read.csv("train.csv")
+head(sales,3)
+```
+
+```{r}
+dim(sales)
+```
+
+
+```{r}
+summary(sales)
+```
+```{r}
+str(sales)
+```
+
+```{r}
+colnames(sales)
+```
+
+
+#### check duplicates and missing values 
+
+
+```{r}
+sum(duplicated(sales))
+```
+
+```{r}
+colSums(is.na(sales))
+```
+
+```{r}
+sales[is.na(sales$Postal.Code), ]
+```
+
+#### all in vermont. so we fill in the postal code 05041
+
+```{r}
+sales$Postal.Code<-replace_na(sales$Postal.Code,05401)
+```
+
+```{r}
+colSums(is.na(sales))
+
+```
+
+#### modify dates
+
+```{r}
+
+sales$Order.Date<-as.Date(sales$Order.Date,'%d/%m/%Y')
+sales$Ship.Date<-as.Date(sales$Ship.Date, '%d/%m/%Y')
+class(sales$Order.Date)
+class(sales$Ship.Date)
+
+```
+
+
+## EDA
+
+
+```{r}
+cat("Number of unique Order IDs:\n")
+length(unique(sales$Order.ID))
+
+cat("Unique Ship Mode:\n")
+unique(sales$Ship.Mode)
+
+cat("Number of unique Customer IDs:\n")
+length(unique(sales$Customer.ID))
+
+cat("Number of unique Customer name:\n")
+length(unique(sales$Customer.Name))
+
+cat("Unique segment:\n")
+unique(sales$Segment)
+
+cat("Unique country:\n")
+unique(sales$Country)
+
+cat("Number of unique Cities:\n")
+length(unique(sales$City))
+
+cat("Unique Region:\n")
+unique(sales$Region)
+```
+```{r}
+#Top 5 customers by value
+### assuming no customers have same name because length of unique customer.id is same as length of unique customer.name
+
+customer_sales <- sales %>% 
+    group_by(Customer.Name) %>% 
+  summarise(sales=round(sum(Sales),2)) %>% 
+  arrange(desc(sales))
+
+head(customer_sales,5)
+
+```
+
+```{r}
+ggplot(head(customer_sales,10), aes(x=fct_reorder(Customer.Name,sales), y=sales)) +geom_col(width = 0.7, fill='skyblue', col="black") +  labs(title = " Top 10 Most Valuable Customers", y="Sales", x="Customer") + 
+  theme(plot.title = element_text(hjust = 0.5), axis.text.x = element_text(angle = 20))+
+geom_text(aes(label = sales), size = 3.5, vjust = -0.5, hjust = 0.5, angle = 0)
+
+
+```
+
+
+```{r}
+# mean sales amount
+mean(sales$Sales)
+```
+
+```{r}
+#sales by order.id
+sales_by_order<-sales %>% 
+  group_by(Order.ID) %>% 
+  summarise(sales=round(sum(Sales),2)) %>% 
+  arrange(desc(sales))
+```
+```{r}
+# mean sales amount by order id 
+mean(sales_by_order$sales)
+```
+
+```{r}
+# sales distribution
+ggplot(sales_by_order, aes(x=sales)) + 
+geom_histogram(aes(y=..density..),fill='white', color='black')+
+geom_density(fill='skyblue', alpha=0.4,size=0.6) + scale_x_log10() + 
+  labs(title = "Sales Distribution")
+```
+
+```{r}
+# sales date analysis
+sales<-sales %>% 
+  mutate(order_year=format(Order.Date,"%Y"),.after=Order.Date)
+
+sales<-sales %>% 
+  mutate(order_month=format(Order.Date,"%b"),.after=order_year)
+
+sales<-sales %>% 
+  mutate(order_day=format(Order.Date,"%a"),.after=order_month)
+
+#Converting month and day to factors for later use
+sales$order_month<-factor(sales$order_month,
+                          levels=c("Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"))
+sales$order_day<-factor(sales$order_day,
+                        levels = c("Mon","Tue","Wed","Thu","Fri","Sat","Sun"))
+```
+
+```{r}
+head(sales,3)
+```
+
+
+```{r}
+sales_by_day<-sales %>% 
+    group_by(order_day) %>% 
+  summarise(sales=round(sum(Sales),0)) 
+
+ggplot(sales_by_day, aes(x=order_day,y=sales)) +
+geom_col(fill="skyblue", alpha=0.7, width = 0.5, color="black") + 
+labs(x="",y="Sales", title="Sales by Day") + 
+theme() + theme(plot.title = element_text(hjust=0.5)) + 
+scale_y_continuous(labels = comma) +
+  geom_text(aes(label = sales), size = 3.5, vjust = -0.5, hjust = 0.5, angle = 0)
+```
+```{r}
+sales_by_month<-sales %>% 
+  group_by(order_month) %>% 
+  summarise(sales=round(sum(Sales),0))
+
+ggplot(sales_by_month, aes(x=order_month,y=sales)) +
+geom_col(fill="skyblue", alpha=0.7, width = 0.7, color="black") + 
+labs(x="",y="Sales", title="Sales by Month") + 
+theme(plot.title = element_text(hjust=0.5)) +
+scale_y_continuous(labels = comma)+
+  geom_text(aes(label = sales), size = 3.5, vjust = -0.5, hjust = 0.5, angle = 0)
+
+```
+
+```{r}
+unique(sales$order_year)
+sales$order_year<-factor(sales$order_year,levels = c(2015,2016,2017,2018))
+```
+```{r}
+sales_by_year<-sales %>% 
+  group_by(order_year) %>% 
+  summarise(sales=round(sum(Sales),0))
+
+ggplot(sales_by_year, aes(x = order_year, y = sales)) +
+  geom_col(fill = "skyblue", alpha = 0.7, width = 0.5, color = "black") +
+  labs(x = "", y = "Sales", title = "Sales by Month") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  scale_y_continuous(labels = comma) +
+  geom_text(aes(label = sales), size = 3.5, vjust = -0.5, hjust = 0.5, angle = 0)
+
+```
+
+```{r}
+
+ship_mode_counts <- table(sales$Ship.Mode)
+
+pie(ship_mode_counts, labels = paste0(names(ship_mode_counts), ": ", round(prop.table(ship_mode_counts) * 100,0), "%"))
+
+```
+
+
+
+```{r}
+sales_by_seg <- sales %>%
+  group_by(Segment) %>%
+  summarise(sales = sum(Sales))
+```
+```{r}
+ggplot(sales_by_seg, aes(x = Segment, y = sales)) +
+  geom_col(fill = 'skyblue', alpha = 0.8,width = 0.5) +
+  labs(x = "Segment", y = "Sales") +
+  #theme(axis.text.x = element_text(angle = 0, vjust = 0.5, hjust = 1)) +
+  geom_text(aes(label = sales), size = 3.5, vjust = -0.5, hjust = 0.5, angle = 0)
+  coord_flip()
+```
+```{r}
+pie(sales_by_seg$sales, labels = paste0(sales_by_seg$Segment, ": ", round(prop.table(sales_by_seg$sales) * 100, 0), "%"))
+
+```
+
+```{r}
+suppressMessages(library(ggthemes))
+
+foo <- sales %>%
+  group_by(State, order_month, order_year) %>% 
+  summarise(sales = sum(Sales))
+
+top_states <- foo %>%
+  group_by(State) %>%
+  summarise(total_sales = sum(sales)) %>%
+  top_n(3, total_sales) %>%
+  pull(State)
+
+filtered_data <- foo %>%
+  filter(State %in% top_states)
+
+ggplot(filtered_data, aes(x = paste(order_month, order_year, sep = "-"), y = sales, group = State, color = State)) +
+  geom_line() +
+  theme_tufte() +
+  labs(x = "Year", y = "Sales", color = "State") +
+  scale_x_discrete(labels = function(x) gsub("-", " ", x)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+
+```
+
+
+```{r}
+top10_states <- foo %>%
+  group_by(State) %>%
+  summarise(total_sales = sum(sales)) %>%
+  top_n(10, total_sales) %>%
+  arrange(total_sales)
+
+ggplot(top10_states, aes(x = reorder(State, desc(total_sales)), y = total_sales)) +
+  geom_bar(stat = "identity", alpha = 0.7, fill = "pink") +
+  geom_text(aes(label = total_sales), vjust = -0.5, hjust = 1, size = 3, color = "black") +
+  labs(x = "State", y = "Total Sales") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  coord_flip()+
+  theme_minimal()
+
+```
+
+```{r}
+sales_by_region<-sales %>% 
+  group_by(Region) %>% 
+  summarise(sales=round(sum(Sales),0))
+
+PieDonut(sales_by_region,aes(Region,count=sales),
+         title = "Sales by Region",r0=0.6) +
+        scale_fill_manual(values = c("skyblue", "grey", "pink", "coral", "purple"))
+```
+
+```{r}
+sales_by_subcat<-sales %>% 
+  group_by(Category,Sub.Category) %>% 
+  summarise(sale=sum(Sales))
+
+PieDonut(sales_by_subcat, 
+         aes(Category,Sub.Category,count=sale),
+         title = "Sales by Category and Sub-Category")
+
+
+```
+
+#### Correlations analysis
+
+
+```{r}
+
+cat<-sales[,c("Category","Sales")]
+
+catdummy<-dummy_cols(cat)
+catdummy<-catdummy %>% 
+  rename(furniture=3, office_supplies=4, technology=5)
+catdummy<-catdummy[,2:5]
+#convert columns data type to numeric
+catdummy$furniture<-as.numeric(catdummy$furniture)
+catdummy$office_supplies<-as.numeric(catdummy$office_supplies)
+catdummy$technology<-as.numeric(catdummy$technology)
+#create a correlation matrix
+corcatdummy<-cor(catdummy)
+#plotting correlation matrix
+corrplot(corcatdummy, type = "upper", method = "color",
+         addCoef.col = "black",
+         tl.col = "black", diag = FALSE, order = "hclust")
+
+
+```
+```{r}
+seg<-sales[,c("Segment","Sales")]
+
+segdummy<-dummy_cols(seg)
+head(segdummy)
+segdummy<-segdummy %>% 
+  rename(consumer=3,corporate=4, home_office=5)
+
+segdummy$consumer<-as.numeric(segdummy$consumer)
+segdummy$corporate<-as.numeric(segdummy$corporate)
+segdummy$home_office<-as.numeric(segdummy$home_office)
+segdummy<-segdummy[,2:5]
+
+corsegdummy<-cor(segdummy)
+
+corrplot(corsegdummy, type = "upper", method = "color",
+         addCoef.col = "black",
+         tl.col = "black", diag = FALSE, order = "hclust")
+```
+
+```{r}
+ship<-sales[,c("Ship.Mode","Sales")]
+
+shipdummy<-dummy_cols(ship)
+shipdummy<-shipdummy[,2:6] %>% 
+  rename(first_class=2, same_day=3, second_class=4)
+
+shipdummy$first_class<-as.numeric(shipdummy$first_class)
+shipdummy$same_day<-as.numeric(shipdummy$same_day)
+shipdummy$second_class<-as.numeric(shipdummy$second_class)
+
+corshipdummy<-cor(shipdummy)
+
+corrplot(corshipdummy, type = "upper", method = "color",
+         addCoef.col = "black",
+         tl.col = "black", diag = FALSE, order = "hclust")
+```
+
+
+```{r}
+re<-sales[,c("Region","Sales")]
+
+redummy<-dummy_cols(re)
+redummy<-redummy[,2:6] %>% 
+  mutate_all(as.numeric)
+
+corredummy<-cor(redummy)
+
+corrplot(corredummy, type = "upper", method = "color",
+         addCoef.col = "black",
+         tl.col = "black", diag = FALSE, order = "hclust")
+```
+
+#### Date plots 
+
+```{r}
+sales_small <- sales[c("Order.Date", "Sales")]
+
+hist(sales_small$Order.Date, breaks = 18,
+     main = "Order Date Histogram",
+     xlab = "Order Date",
+     ylab = "Count")
+
+
+```
+
+## Predict sales for most valuable states (Top 3) in 2018.
+
+```{r}
+foo <- sales %>%
+  group_by(State, Order.Date, order_month, order_year) %>% 
+  summarise(sales = sum(Sales))
+
+top_states <- foo %>%
+  group_by(State) %>%
+  summarise(total_sales = sum(sales)) %>%
+  top_n(3, total_sales) %>%
+  pull(State)
+
+df <- foo %>%
+  filter(State %in% top_states)
+
+```
+
+
+```{r}
+dim(df)
+```
+
+
+```{r}
+df$Order.Date <- floor_date(df$Order.Date, "month")
+```
+```{r}
+df<- df %>%
+  group_by(State, Order.Date) %>% 
+  summarise(sales = sum(sales))
+```
+```{r}
+ca_df <- subset(df, State == "California", select = c(Order.Date, sales))
+ny_df <- subset(df, State == "New York", select = c(Order.Date, sales))
+tx_df <- subset(df, State == "Texas", select = c(Order.Date, sales))
+```
+
+```{r}
+library(xts)
+
+ca_xts <- as.xts(ca_df$sales, order.by = ca_df$Order.Date)
+ny_xts <- as.xts(ny_df$sales, order.by = ny_df$Order.Date)
+tx_xts <- as.xts(tx_df$sales, order.by = tx_df$Order.Date)
+```
+
+
+```{r}
+plot(ca_xts, main = "CA Sales", ylab = "sales")
+plot(ny_xts, main = "NY Sales", ylab = "sales")
+plot(tx_xts, main = "TX Sales", ylab = "sales")
+```
+
+```{r}
+ca_train <- ca_xts["/2017-12-01"]
+ca_test <- ca_xts["2018-01-01/"]
+
+ny_train <- ny_xts["/2017-12-01"]
+ny_test <- ny_xts["2018-01-01/"]
+
+tx_train <- tx_xts["/2017-12-01"]
+tx_test <- tx_xts["2018-01-01/"]
+```
+
+```{r}
+acf(ca_train)
+acf(ny_train)
+acf(tx_train)
+```
+```{r}
+suppressMessages(library(tseries))
+adf.test(ca_train)
+kpss.test(ca_train)
+
+```
+```{r}
+adf.test(ny_train)
+kpss.test(ny_train)
+```
+
+```{r}
+adf.test(tx_train)
+kpss.test(tx_train)
+```
+
+### 1. Use forecast::auto.arima with no seasonality to get a baseline model 
+
+```{r}
+suppressMessages(library(forecast))
+
+ca_base <- auto.arima(ca_train, seasonal = FALSE)
+ca_base
+```
+
+```{r}
+ny_base <- auto.arima(ny_train, seasonal = FALSE)
+ny_base
+```
+
+```{r}
+tx_base <- auto.arima(tx_train, seasonal = FALSE)
+tx_base
+```
+
+
+CA
+```{r}
+a <- length(ca_test)
+forecast_ca_base <- forecast(ca_base, h = a)
+plot(forecast_ca_base, main = "Forecasts of CA monthly sales 2018 - baseline model")
+
+residuals_ca <- ca_test - forecast_ca_base$mean
+checkresiduals(residuals_ca)
+```
+```{r}
+acc_ca_base <- accuracy(forecast_ca_base, ca_test)
+acc_ca_base
+```
+
+NY
+
+```{r}
+forecast_ny_base <- forecast(ny_base, h = 12)
+plot(forecast_ny_base, main = "Forecasts of NY monthly sales 2018 - baseline model")
+acc_ny_base <- accuracy(forecast_ny_base, ny_test)
+acc_ny_base
+
+residuals_ny <- ny_test - forecast_ny_base$mean
+checkresiduals(residuals_ny)
+```
+
+TX
+
+```{r}
+forecast_tx_base <- forecast(tx_base, h = 12)
+plot(forecast_tx_base, main = "Forecasts of TX monthly sales 2018 - baseline model")
+acc_tx_base <- accuracy(forecast_tx_base, tx_test)
+acc_tx_base
+
+residuals_tx <- tx_test - forecast_tx_base$mean
+checkresiduals(residuals_tx)
+```
+
+#### predictions for these three are pretty bad with high RMSE. 
+
+### 2. Seasonal ARIMA (SARIMA) - here seasonality is monthly
+
+CA
+
+```{r}
+ca_SA <- auto.arima(ts(ca_train, frequency=12), seasonal = TRUE)
+summary(ca_SA)
+
+forecast_ca_SA <- forecast(ca_SA, h = 12)
+acc_ca_SA <- accuracy(forecast_ca_SA, ca_test)
+acc_ca_SA
+
+plot(forecast_ca_SA, main = "Forecasts of CA monthly sales 2018 - SARIMA model")
+
+residuals_ca1 <- ca_test - forecast_ca_SA$mean
+checkresiduals(residuals_ca1)
+
+```
+
+NY
+
+```{r}
+ny_SA <- auto.arima(ts(ny_train, frequency=12), seasonal = TRUE)
+summary(ny_SA)
+
+forecast_ny_SA <- forecast(ny_SA, h = 12)
+acc_ny_SA <- accuracy(forecast_ny_SA, ny_test)
+acc_ny_SA
+
+plot(forecast_ny_SA, main = "Forecasts of NY monthly sales 2018 - SARIMA model")
+
+residuals_ny1 <- ny_test - forecast_ny_SA$mean
+checkresiduals(residuals_ny1)
+```
+TX
+
+```{r}
+tx_SA <- auto.arima(ts(tx_train, frequency=12), seasonal = TRUE)
+summary(tx_SA)
+
+forecast_tx_SA <- forecast(tx_SA, h = 12)
+acc_tx_SA <- accuracy(forecast_tx_SA, tx_test)
+acc_tx_SA
+
+plot(forecast_tx_SA, main = "Forecasts of TX monthly sales 2018 - SARIMA model")
+
+residuals_tx1 <- tx_test - forecast_tx_SA$mean
+checkresiduals(residuals_tx1)
+```
+
+### 3. Holt Winter 
+
+
+CA
+
+```{r}
+HW.ca <- HoltWinters(ts(ca_train, frequency=12))
+HW.ca
+
+forecast_HW.ca <- forecast(HW.ca, h = 12)
+acc_HW.ca <- accuracy(forecast_HW.ca, ca_test)
+acc_HW.ca
+
+plot(forecast_HW.ca, main = "Forecasts of CA monthly sales 2018 - HW model")
+
+residuals_ca2 <- ca_test - forecast_HW.ca$mean
+checkresiduals(residuals_ca2)
+```
+
+NY
+
+```{r}
+HW.ny <- HoltWinters(ts(ny_train, frequency=12))
+HW.ny
+
+forecast_HW.ny <- forecast(HW.ny, h = 12)
+acc_HW.ny <- accuracy(forecast_HW.ny, ny_test)
+acc_HW.ny
+
+plot(forecast_HW.ny, main = "Forecasts of NY monthly sales 2018 - HW model")
+
+residuals_ny2 <- ny_test - forecast_HW.ny$mean
+checkresiduals(residuals_ny2)
+
+```
+
+TX
+
+```{r}
+HW.tx <- HoltWinters(ts(tx_train, frequency=12))
+HW.tx
+
+forecast_HW.tx <- forecast(HW.tx, h = 12)
+acc_HW.tx <- accuracy(forecast_HW.tx, tx_test)
+acc_HW.tx
+
+plot(forecast_HW.tx, main = "Forecasts of TX monthly sales 2018 - HW model")
+
+residuals_tx2 <- tx_test - forecast_HW.tx$mean
+checkresiduals(residuals_tx2)
+```
+
+#### 4. arfima 
+CA
+```{r}
+m41 <- forecast::arfima(ts(ca_train))
+
+summary(m41)
+
+pred_41 <- forecast(m41, h = length(ca_test))
+resid_41 <- ca_test - pred_41$mean
+checkresiduals(resid_41)
+mean(resid_41)
+```
+
+
+NY 
+
+```{r}
+m42 <- forecast::arfima(ts(ny_train))
+
+summary(m42)
+
+pred_42 <- forecast(m42, h = length(ny_test))
+resid_42 <- ny_test - pred_42$mean
+checkresiduals(resid_42)
+mean(resid_42)
+```
+
+
+TX
+```{r}
+m43 <- forecast::arfima(ts(tx_train))
+
+summary(m43)
+
+pred_43 <- forecast(m43, h = length(tx_test))
+resid_43 <- tx_test - pred_43$mean
+checkresiduals(resid_43)
+mean(resid_43)
+```
+
+
+## Predict overall sales (all states aggregated)
+
+
+```{r}
+agg_sales <- sales %>%
+  group_by(Order.Date) %>% 
+  summarise(sales = sum(Sales))
+```
+
+```{r}
+drange <- seq(as.Date("2015-01-03"), as.Date("2018-12-30"), by="day")
+
+dall <- data.frame(Order.Date = drange)
+
+dall <- merge(agg_sales, dall, by=c("Order.Date"), all.y=TRUE)
+
+```
+```{r}
+dim(dall[is.na(dall$sales),])
+```
+```{r}
+dim(dall)
+```
+```{r}
+sales_xts <- as.xts(dall$sales, order.by = dall$Order.Date)
+```
+
+
+#### there are missing dates in original dataset. so after merging the dataset with the full date rage, there are missing values. now we fill them with 0. (because no sales occurred that day) 
+
+```{r}
+
+sales_xts <- na.fill(sales_xts, 0)
+
+```
+```{r}
+sum(is.na(sales_xts))
+```
+```{r}
+plot(sales_xts, main = "Total Sales by Date", ylab = "sales")
+```
+```{r}
+train <- sales_xts["/2018-11-30"]
+test <- sales_xts["2018-12-01/"]
+```
+```{r}
+dim(train)
+dim(test)
+```
+
+```{r}
+acf(train)
+```
+```{r}
+adf.test(train)
+kpss.test(train)
+```
+
+### 1. forecast::auto.arima 
+
+
+```{r}
+base <- auto.arima(train, seasonal = FALSE)
+base
+
+a <- length(test)
+forecast_base <- forecast(base, h = a)
+plot(forecast_base, main = "Forecasts of Daily sales 2018 - baseline model")
+```
+
+### 2. seasonal arima 
+
+
+```{r}
+model.1 <- auto.arima(train, seasonal = TRUE)
+summary(model.1)
+```
+
+```{r}
+m1.forecast <- forecast(model.1, h=a)
+
+plot(m1.forecast, main = "Forecasts of daily sales 2018 - sarima")
+resid_m1 <- residuals(model.1)
+
+mean(resid_m1) 
+```
+
+```{r}
+checkresiduals(resid_m1)
+```
+
+### 3. holt winters
+  
+```{r}
+hw <-  HoltWinters(train, gamma = FALSE, seasonal = 'additive')
+hw
+hw_forecast <-  forecast(hw, h = length(test))
+resid_hw <- test - hw_forecast$mean
+
+plot(hw_forecast, main = "Forecasts of daily sales 2018 - HoltWinters")
+
+plot(hw_forecast$mean, main = "Forecasts of daily sales 2018(zoom in) - HoltWinters")
+
+checkresiduals(resid_hw)
+```
+### 4. ARFIMA
+
+```{r}
+
+m4 <- forecast::arfima(ts(train))
+AIC(m4)
+summary(m4)
+```
+
+```{r}
+pred_ARFIMA <- forecast(m4, h = length(test))
+
+resid_arf <- test - pred_ARFIMA$mean
+
+checkresiduals(resid_arf)
+
+mean(resid_arf)
+
+plot(pred_ARFIMA, main = "Forecasts of daily sales 2018 - ARFIMA")
+
+plot(pred_ARFIMA$mean, main = "Forecasts of daily sales 2018(zoom in) - ARFIMA")
+```
+
+ 
+ 
